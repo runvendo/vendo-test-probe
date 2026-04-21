@@ -1,0 +1,11 @@
+{
+  "name": "vendo-test-probe",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  }
+}
