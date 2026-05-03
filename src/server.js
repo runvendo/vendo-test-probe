@@ -88,6 +88,43 @@ if (!isMainThread) {
       return json(res, 200, { mode });
     }
 
+    // /proxy-test — deterministic payload for the proxy request-path e2e
+    // suite. Exercises byte metering, streaming, timing, and upstream error
+    // passthrough without needing a real third-party provider. Accepts any
+    // HTTP method so the proxy's method-passthrough tests (POST / PUT /
+    // DELETE) can verify the upstream actually receives the verb the caller
+    // sent. Request body is drained but ignored.
+    if (url.pathname === "/proxy-test") {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        // Drain the request body so the connection can close cleanly.
+        for await (const _ of req) { /* discard */ }
+      }
+      const bytes = Number(url.searchParams.get("bytes") ?? 1024);
+      const delayMs = Number(url.searchParams.get("delay_ms") ?? 0);
+      const status = Number(url.searchParams.get("status") ?? 200);
+      if (!Number.isInteger(bytes) || bytes < 0 || bytes > MAX_BYTES) {
+        return json(res, 400, { error: `bytes must be integer 0..${MAX_BYTES}` });
+      }
+      if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > MAX_DELAY_MS) {
+        return json(res, 400, { error: `delay_ms must be 0..${MAX_DELAY_MS}` });
+      }
+      if (!Number.isInteger(status) || status < 100 || status > 599) {
+        return json(res, 400, { error: "status must be a valid HTTP status" });
+      }
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+      const body = payloadBuffer(bytes);
+      res.writeHead(status, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(bytes),
+      });
+      if (req.method === "HEAD") {
+        res.end();
+      } else {
+        res.end(body);
+      }
+      return;
+    }
+
     if (req.method !== "GET") {
       return json(res, 405, { error: "method not allowed" });
     }
@@ -115,32 +152,6 @@ if (!isMainThread) {
       }
       await burn(seconds, cpu);
       return json(res, 200, { burned: { seconds, cpu } });
-    }
-
-    // GET /proxy-test — deterministic payload for the proxy request-path
-    // e2e suite. Exercises byte metering, streaming, timing, and upstream
-    // error passthrough without needing a real third-party provider.
-    if (url.pathname === "/proxy-test") {
-      const bytes = Number(url.searchParams.get("bytes") ?? 1024);
-      const delayMs = Number(url.searchParams.get("delay_ms") ?? 0);
-      const status = Number(url.searchParams.get("status") ?? 200);
-      if (!Number.isInteger(bytes) || bytes < 0 || bytes > MAX_BYTES) {
-        return json(res, 400, { error: `bytes must be integer 0..${MAX_BYTES}` });
-      }
-      if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > MAX_DELAY_MS) {
-        return json(res, 400, { error: `delay_ms must be 0..${MAX_DELAY_MS}` });
-      }
-      if (!Number.isInteger(status) || status < 100 || status > 599) {
-        return json(res, 400, { error: "status must be a valid HTTP status" });
-      }
-      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
-      const body = payloadBuffer(bytes);
-      res.writeHead(status, {
-        "Content-Type": "application/octet-stream",
-        "Content-Length": String(bytes),
-      });
-      res.end(body);
-      return;
     }
 
     return json(res, 404, { error: "not found" });
